@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Solfeggio">
+<title>Solfeggio Trainer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html{height:100%;overflow:hidden;background:#24243e}
+  body{height:100%;overflow:hidden}
+  body{
+    background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);
+    color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;
+    display:flex;flex-direction:column;align-items:center;
+    padding:12px 16px 0;
+    user-select:none;height:100dvh;
+  }
+  h1{font-size:16px;font-weight:700;letter-spacing:2px;text-transform:uppercase;opacity:.7;margin-bottom:8px;margin-top:4px}
+
+  .row{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap}
+  .settings{gap:12px;margin-bottom:8px}
+  .label{font-size:11px;opacity:.5;margin-bottom:2px;text-align:center}
+  .bpm-val{font-size:24px;font-weight:700;min-width:40px;text-align:center}
+  .sm-btn{width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  input[type=range]{width:120px;accent-color:#7c5cfc}
+  .chip{padding:6px 12px;border-radius:8px;border:none;color:#fff;font-size:14px;cursor:pointer;background:rgba(255,255,255,.1)}
+  .chip.active{background:#7c5cfc;font-weight:700}
+  .key-toggle{width:40px;height:40px;border-radius:10px;border:2px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:rgba(255,255,255,.3);font-size:16px;font-weight:700;cursor:pointer;transition:all .15s}
+  .key-toggle.on{border-color:#7c5cfc;background:rgba(124,92,252,.2);color:#fff}
+
+  .main-area{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;min-height:0}
+  .current-key{font-size:min(70vw,440px);font-weight:900;letter-spacing:-3px;text-shadow:0 0 60px rgba(124,92,252,.5)}
+  .countin-num{font-size:min(60vw,320px);font-weight:900;opacity:.5}
+
+  .beats{display:flex;gap:12px;margin-bottom:16px;height:30px;align-items:center}
+  .dot{border-radius:50%;transition:all .08s ease-out}
+
+  .start-btn{
+    width:180px;height:52px;border-radius:26px;border:none;
+    color:#fff;font-size:18px;font-weight:700;letter-spacing:2px;cursor:pointer;
+    margin-bottom:48px;flex-shrink:0;
+  }
+  .start-btn.go{background:linear-gradient(135deg,#7c5cfc,#a855f7);box-shadow:0 6px 24px rgba(124,92,252,.3)}
+  .start-btn.stop{background:linear-gradient(135deg,#ff6b6b,#ee5a24);box-shadow:0 6px 24px rgba(255,107,107,.3)}
+  .start-btn:disabled{opacity:.4}
+</style>
+</head>
+<body>
+
+<h1>Solfeggio Trainer</h1>
+
+<!-- BPM -->
+<div class="row settings">
+  <div>
+    <div class="label">BPM</div>
+    <div class="row">
+      <button class="sm-btn" id="bpmDec">−</button>
+      <span class="bpm-val" id="bpmVal">60</span>
+      <button class="sm-btn" id="bpmInc">+</button>
+      <input type="range" id="bpmSlider" min="30" max="240" value="60">
+    </div>
+  </div>
+</div>
+
+<!-- Time sig + count-in -->
+<div class="row" style="gap:6px;margin-bottom:8px">
+  <div id="timeSigs"></div>
+  <button class="chip active" id="countInBtn" style="margin-left:8px">Отсчёт</button>
+</div>
+
+<!-- Key toggles -->
+<div class="row" id="keysRow" style="gap:6px;margin-bottom:4px"></div>
+
+<!-- Main display -->
+<div class="main-area">
+  <div id="display" class="current-key">C</div>
+</div>
+
+<!-- Beat dots -->
+<div class="beats" id="beatsRow"></div>
+
+<!-- Start/Stop -->
+<button class="start-btn go" id="startBtn">СТАРТ</button>
+
+<script>
+const ALL_KEYS=["C","D","F","A","E","B","G"];
+const TS=[{l:"2/4",b:2},{l:"3/4",b:3},{l:"4/4",b:4},{l:"6/8",b:6}];
+let bpm=60,tsIdx=2,playing=false,countIn=true;
+let enKeys=Object.fromEntries(ALL_KEYS.map(k=>[k,true]));
+let curKey="C",beatIdx=0,firstM=true,isCounting=false,ciBeat=0;
+let syn,acc,lp;
+const $=id=>document.getElementById(id);
+const pool=()=>ALL_KEYS.filter(k=>enKeys[k]);
+const rk=(ex,p)=>{const f=p.filter(k=>k!==ex);return f[Math.floor(Math.random()*f.length)]};
+
+function uBpm(v){bpm=Math.max(30,Math.min(240,v));$("bpmVal").textContent=bpm;$("bpmSlider").value=bpm;if(playing)Tone.getTransport().bpm.value=bpm}
+$("bpmDec").onclick=()=>uBpm(bpm-1);
+$("bpmInc").onclick=()=>uBpm(bpm+1);
+$("bpmSlider").oninput=e=>uBpm(+e.target.value);
+
+function rTS(){
+  $("timeSigs").innerHTML=TS.map((t,i)=>`<button class="chip ${i===tsIdx?'active':''}" data-i="${i}">${t.l}</button>`).join("");
+  $("timeSigs").querySelectorAll("button").forEach(b=>{b.onclick=()=>{if(playing)stop();tsIdx=+b.dataset.i;rTS();rBd()}});
+}
+
+$("countInBtn").onclick=()=>{countIn=!countIn;$("countInBtn").className="chip"+(countIn?" active":"");$("countInBtn").textContent=countIn?"Отсчёт":"Без отсч."};
+
+function rK(){
+  $("keysRow").innerHTML=ALL_KEYS.map(k=>`<button class="key-toggle ${enKeys[k]?'on':''}" data-k="${k}">${k}</button>`).join("");
+  $("keysRow").querySelectorAll("button").forEach(b=>{
+    b.onclick=()=>{const k=b.dataset.k,n={...enKeys,[k]:!enKeys[k]};if(Object.values(n).filter(Boolean).length===0)return;enKeys=n;rK();uBtn()}
+  });
+}
+
+function rBd(){
+  const bs=TS[tsIdx].b;
+  $("beatsRow").innerHTML=Array.from({length:bs},(_,i)=>`<div class="dot" id="d${i}" style="width:${i?18:24}px;height:${i?18:24}px;background:rgba(255,255,255,.12)"></div>`).join("");
+}
+
+function uBd(beat){
+  const bs=TS[tsIdx].b;
+  for(let i=0;i<bs;i++){const e=$("d"+i);if(!e)continue;
+    if(i===beat){e.style.background=i===0?"#ff6b6b":"#7c5cfc";e.style.boxShadow=i===0?"0 0 16px rgba(255,107,107,.6)":"0 0 12px rgba(124,92,252,.5)"}
+    else{e.style.background="rgba(255,255,255,.12)";e.style.boxShadow="none"}}
+}
+
+function uBtn(){const b=$("startBtn");b.disabled=pool().length===0;b.textContent=playing?"СТОП":"СТАРТ";b.className="start-btn "+(playing?"stop":"go")}
+
+async function start(){
+  await Tone.start();
+  if(!syn)syn=new Tone.Synth({oscillator:{type:"triangle"},envelope:{attack:.001,decay:.1,sustain:0,release:.05},volume:-10}).toDestination();
+  if(!acc)acc=new Tone.Synth({oscillator:{type:"triangle"},envelope:{attack:.001,decay:.1,sustain:0,release:.05},volume:-6}).toDestination();
+  const bs=TS[tsIdx].b,p=pool();if(!p.length)return;
+  beatIdx=0;firstM=true;
+  curKey=p[Math.floor(Math.random()*p.length)];
+  $("display").textContent=curKey;$("display").className=countIn?"countin-num":"current-key";
+  isCounting=countIn;ciBeat=0;
+
+  Tone.getTransport().bpm.value=bpm;Tone.getTransport().cancel();Tone.getTransport().stop();
+
+  lp=new Tone.Loop(time=>{
+    if(isCounting){
+      const cb=ciBeat;(cb===0?acc:syn).triggerAttackRelease(cb===0?"C5":"G4","32n",time);
+      Tone.getDraw().schedule(()=>{$("display").textContent=cb+1;uBd(cb)},time);
+      ciBeat++;
+      if(ciBeat>=bs){isCounting=false;beatIdx=0;firstM=true;
+        Tone.getDraw().schedule(()=>{$("display").className="current-key";$("display").textContent=curKey},time)}
+      return;
+    }
+    const beat=beatIdx;
+    if(beat===0&&!firstM){const p2=pool();if(p2.length>0){curKey=p2.length>1?rk(curKey,p2):p2[0];Tone.getDraw().schedule(()=>{$("display").textContent=curKey},time)}}
+    (beat===0?acc:syn).triggerAttackRelease(beat===0?"A5":"A4","32n",time);
+    Tone.getDraw().schedule(()=>{uBd(beat)},time);
+    const nx=(beat+1)%bs;beatIdx=nx;if(nx===0)firstM=false;
+  },"4n");
+
+  lp.start(0);Tone.getTransport().start();playing=true;uBtn();
+}
+
+function stop(){
+  Tone.getTransport().stop();Tone.getTransport().cancel();
+  if(lp){lp.dispose();lp=null}
+  playing=false;isCounting=false;
+  $("display").className="current-key";uBtn();rBd();
+}
+
+$("startBtn").onclick=()=>playing?stop():start();
+rTS();rK();rBd();
+</script>
+</body>
+</html>
